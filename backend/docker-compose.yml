@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: football_scouting_db
+    environment:
+      POSTGRES_USER: football_user
+      POSTGRES_PASSWORD: football_pass_2024
+      POSTGRES_DB: football_scouting
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - football_network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: football_scouting_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - football_network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # Optional: Redis Admin UI
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: football_redis_admin
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    networks:
+      - football_network
+    depends_on:
+      - redis
+
+  # Optional: PostgreSQL Admin UI
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: football_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@footballscout.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - football_network
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
+  redis_data:
+  pgadmin_data:
+
+networks:
+  football_network:
+    driver: bridge
