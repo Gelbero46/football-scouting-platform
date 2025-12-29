@@ -6,13 +6,13 @@ services:
     container_name: football_scouting_db
     environment:
       POSTGRES_USER: football_user
-      POSTGRES_PASSWORD: football_pass_2024
+      POSTGRES_PASSWORD: football_pass_2025
       POSTGRES_DB: football_scouting
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+      # - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
     networks:
       - football_network
     restart: unless-stopped

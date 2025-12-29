@@ -1,10 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from typing import Any
+from sqlalchemy import and_, desc
+from typing import Any, Optional
+import uuid
+from datetime import datetime, timedelta
 
 from app.core.database import get_db
 from app.schemas.report import ReportResponse, ReportCreate
 from app.schemas.common import StandardResponse, PaginatedResponse
+from app.models import Report
 
 router = APIRouter()
 
@@ -12,39 +16,37 @@ router = APIRouter()
 async def get_reports(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
-    type: str = Query(None, description="Filter by report type"),
+    type: Optional[str] = Query(None, description="Filter by report type"),
+    status: Optional[str] = Query(None, description="Filter by status"),
     db: Session = Depends(get_db)
 ) -> Any:
-    """Get user's reports"""
+    """Get user's reports with filtering"""
     
-    sample_reports = [
-        {
-            "id": "report-1",
-            "title": "Erling Haaland - Scouting Report",
-            "type": "player_scout",
-            "status": "completed",
-            "generated_at": "2024-01-15T16:30:00Z",
-            "file_size": 2048000
-        },
-        {
-            "id": "report-2",
-            "title": "Summer Targets Comparison",
-            "type": "comparison",
-            "status": "completed", 
-            "generated_at": "2024-01-14T09:15:00Z",
-            "file_size": 1536000
-        }
-    ]
+    query = db.query(Report)
+    
+    # Apply filters
+    if type:
+        query = query.filter(Report.type == type)
+    
+    if status:
+        query = query.filter(Report.status == status)
+    
+    # Order by creation date (newest first)
+    query = query.order_by(desc(Report.created_at))
+    
+    # Pagination
+    total = query.count()
+    reports = query.offset(skip).limit(limit).all()
     
     return {
         "success": True,
-        "data": sample_reports,
+        "data": reports,
         "meta": {
             "pagination": {
                 "page": (skip // limit) + 1,
                 "per_page": limit,
-                "total": 2,
-                "total_pages": 1
+                "total": total,
+                "total_pages": (total + limit - 1) // limit
             }
         }
     }
@@ -54,16 +56,66 @@ async def generate_report(
     report_data: ReportCreate,
     db: Session = Depends(get_db)
 ) -> Any:
-    """Generate new report"""
+    """Generate new report (async processing)"""
+    
+    # Create report record
+    report = Report(
+        title=report_data.title,
+        type=report_data.type,
+        parameters=report_data.parameters,
+        filters=report_data.filters,
+        status="pending",
+        # generated_by=current_user.id,  # Add when auth is ready
+        expires_at=(datetime.utcnow() + timedelta(days=30)).isoformat()  # 30 days expiry
+    )
+    
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    
+    # TODO: Queue background task for actual report generation
+    # For now, we'll just mark as generating
+    report.status = "generating"
+    db.commit()
+    
     return {
         "success": True,
-        "data": {
-            "id": "new-report-id",
-            "title": report_data.title,
-            "type": report_data.type,
-            "status": "pending",
-            "message": "Report generation started"
-        }
+        "data": report
+    }
+
+@router.get("/{report_id}", response_model=StandardResponse[ReportResponse])
+async def get_report(
+    report_id: str,
+    db: Session = Depends(get_db)
+) -> Any:
+    """Get report details"""
+    
+    try:
+        report_uuid = uuid.UUID(report_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid report ID format"
+        )
+    
+    report = db.query(Report).filter(Report.id == report_uuid).first()
+    
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found"
+        )
+    
+    # Check if report has expired
+    if report.is_expired:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Report has expired"
+        )
+    
+    return {
+        "success": True,
+        "data": report
     }
 
 @router.get("/{report_id}/download")
@@ -72,11 +124,80 @@ async def download_report(
     db: Session = Depends(get_db)
 ) -> Any:
     """Download report file"""
-    # Placeholder - we'll implement file serving later
+    
+    try:
+        report_uuid = uuid.UUID(report_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid report ID format"
+        )
+    
+    report = db.query(Report).filter(Report.id == report_uuid).first()
+    
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found"
+        )
+    
+    if report.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Report is not ready. Current status: {report.status}"
+        )
+    
+    if report.is_expired:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Report has expired"
+        )
+    
+    # Update download count
+    report.increment_download_count()
+    db.commit()
+    
+    # TODO: Return actual file or signed URL
+    # For now, return download info
     return {
         "success": True,
         "data": {
-            "download_url": f"https://api.footballscout.com/files/reports/{report_id}.pdf",
-            "expires_at": "2024-01-16T16:30:00Z"
+            "download_url": f"/files/reports/{report.file_name}",
+            "file_name": report.file_name,
+            "file_size": report.file_size,
+            "expires_in": "24 hours"
         }
+    }
+
+@router.delete("/{report_id}")
+async def delete_report(
+    report_id: str,
+    db: Session = Depends(get_db)
+) -> Any:
+    """Delete report"""
+    
+    try:
+        report_uuid = uuid.UUID(report_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid report ID format"
+        )
+    
+    report = db.query(Report).filter(Report.id == report_uuid).first()
+    
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Report not found"
+        )
+    
+    # TODO: Delete actual file from storage
+    
+    db.delete(report)
+    db.commit()
+    
+    return {
+        "success": True,
+        "data": {"message": "Report deleted successfully"}
     }

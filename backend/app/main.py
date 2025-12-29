@@ -7,6 +7,8 @@ import logging
 
 from app.core.config import settings
 from app.api.v1.api import api_router
+from app.core.database import health_check
+
 
 # Configure logging
 logging.basicConfig(level=settings.LOG_LEVEL)
@@ -75,15 +77,30 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 # Health check endpoint
 @app.get("/health")
-async def health_check():
+async def health_check_endpoint():
+    health_info = health_check()
+    
+    # Determine overall status
+    overall_healthy = (
+        health_info["database"]["status"] == "healthy" and 
+        health_info["redis"]["status"] == "healthy"
+    )
+    
     return {
         "success": True,
-        "data": {
-            "status": "healthy",
-            "version": settings.VERSION,
-            "environment": settings.ENVIRONMENT
-        }
+        "status": "healthy" if overall_healthy else "unhealthy",
+        "services": health_info,
+        "version": settings.VERSION,
+        "environment": settings.ENVIRONMENT
     }
+    # return {
+    #     "success": True,
+    #     "data": {
+    #         "status": "healthy",
+    #         "version": settings.VERSION,
+    #         "environment": settings.ENVIRONMENT
+    #     }
+    # }
 
 # Include API routes
 app.include_router(api_router, prefix=settings.API_V1_STR)

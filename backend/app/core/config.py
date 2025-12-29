@@ -20,8 +20,12 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
+    #Admin
+    SUPER_ADMIN_EMAILS: List[str]
+
     # Authentication
     CLERK_SECRET_KEY: str
+    CLERK_PUBLISHABLE_KEY: str
     CLERK_WEBHOOK_SECRET: str
     
     # Environment
