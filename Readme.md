@@ -529,7 +529,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 👥 Authors
 
-- Your Name - Initial work
+- Ibikunle Ekundayo - Initial work
 
 ## 🙏 Acknowledgments
 
@@ -586,4 +586,4 @@ For support, email gelberoo46@gmail.com or join our Slack channel.
 
 ---
 
-Built with ❤️ for football recruitment professionals
+Built for football recruitment professionals
